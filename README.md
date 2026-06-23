@@ -27,4 +27,4 @@ Bu proje, Android platformu için geliştirilmiş gelişmiş bir mobil video dü
 
 ## 📜 Lisans
 
-Bu proje eğitim amaçlı geliştirilmiştir.
+Bu proje eğitim ve ticari amaçlı geliştirilmiştir.
