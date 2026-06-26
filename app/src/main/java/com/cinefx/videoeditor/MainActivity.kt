@@ -112,6 +112,7 @@ import com.cinefx.videoeditor.ui.theme.SurfaceDarkBlue
 import com.cinefx.videoeditor.ui.theme.TextLight
 import com.cinefx.videoeditor.ui.theme.TextMuted
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -959,11 +960,22 @@ fun VideoEditorApp() {
                             Spacer(modifier = Modifier.height(12.dp))
 
                             if (videoUri2 == null) {
+                                if (!AppConfig.canJoinVideo(context)) {
+                                    Text(
+                                        "🔒 Video birleştirme Pro özelliğidir",
+                                        fontSize = 12.sp,
+                                        color = Color(0xFFFFD700),
+                                        modifier = Modifier.padding(vertical = 8.dp)
+                                    )
+                                }
                                 Button(
                                     onClick = { videoPickerLauncher2.launch("video/*") },
-                                    colors = ButtonDefaults.buttonColors(containerColor = DeepViolet),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (AppConfig.canJoinVideo(context)) DeepViolet else Color(0xFF3A3A3A)
+                                    ),
                                     shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.fillMaxWidth()
+                                    modifier = Modifier.fillMaxWidth(),
+                                    enabled = AppConfig.canJoinVideo(context)
                                 ) {
                                     Icon(Icons.Default.Movie, Strings.get("entry", appLanguage), tint = Color.White)
                                     Spacer(modifier = Modifier.width(8.dp))
@@ -2231,36 +2243,62 @@ fun VideoEditorApp() {
                             }
                             Spacer(modifier = Modifier.height(12.dp))
 
+                            val availableFilters = AppConfig.getAvailableFilters(context)
+                            val allFilters = FilterType.values().toList()
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                FilterType.values().take(3).forEach { type ->
+                                allFilters.take(3).forEach { type ->
+                                    val isLocked = type !in availableFilters
                                     Box(
                                         modifier = Modifier
                                             .weight(1f)
                                             .clip(RoundedCornerShape(8.dp))
-                                            .background(if (selectedFilterType == type) DeepViolet else Color.DarkGray)
-                                            .clickable { selectedFilterType = type }
+                                            .background(
+                                                if (isLocked) Color(0xFF2A2A2A)
+                                                else if (selectedFilterType == type) DeepViolet else Color.DarkGray
+                                            )
+                                            .clickable(enabled = !isLocked) { selectedFilterType = type }
                                             .padding(vertical = 8.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Text(type.name, fontSize = 10.sp, color = Color.White)
+                                        Text(
+                                            if (isLocked) "${type.name} 🔒" else type.name,
+                                            fontSize = 10.sp,
+                                            color = if (isLocked) Color.Gray else Color.White
+                                        )
                                     }
                                 }
                             }
                             Spacer(modifier = Modifier.height(4.dp))
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                FilterType.values().drop(3).forEach { type ->
+                                allFilters.drop(3).forEach { type ->
+                                    val isLocked = type !in availableFilters
                                     Box(
                                         modifier = Modifier
                                             .weight(1f)
                                             .clip(RoundedCornerShape(8.dp))
-                                            .background(if (selectedFilterType == type) DeepViolet else Color.DarkGray)
-                                            .clickable { selectedFilterType = type }
+                                            .background(
+                                                if (isLocked) Color(0xFF2A2A2A)
+                                                else if (selectedFilterType == type) DeepViolet else Color.DarkGray
+                                            )
+                                            .clickable(enabled = !isLocked) { selectedFilterType = type }
                                             .padding(vertical = 8.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Text(type.name, fontSize = 10.sp, color = Color.White)
+                                        Text(
+                                            if (isLocked) "${type.name} 🔒" else type.name,
+                                            fontSize = 10.sp,
+                                            color = if (isLocked) Color.Gray else Color.White
+                                        )
                                     }
                                 }
+                            }
+                            if (!AppConfig.isProVersion(context)) {
+                                Text(
+                                    "⭐ Pro ile tüm filtreler açılır",
+                                    fontSize = 10.sp,
+                                    color = Color(0xFFFFD700),
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
                             }
 
                             Spacer(modifier = Modifier.height(12.dp))
@@ -2299,6 +2337,16 @@ fun VideoEditorApp() {
                     }
 
                     Spacer(modifier = Modifier.height(24.dp))
+
+                    // Export resolution info
+                    if (!AppConfig.isProVersion(context)) {
+                        Text(
+                            "📐 Free: 720p | ⭐ Pro: 1080p/4K",
+                            fontSize = 11.sp,
+                            color = Color(0xFFFFD700),
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                        )
+                    }
 
                     // 3. Export Main CTA Button
                     Button(
@@ -2593,30 +2641,98 @@ fun VideoEditorApp() {
                         }
                     }
                     Spacer(modifier = Modifier.height(16.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
+                    // Pro License Activation Section
+                    if (AppConfig.isProVersion(context)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "⭐ Pro Aktif",
+                                color = Color(0xFFFFD700),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    } else {
+                        var licenseInput by remember { mutableStateOf("") }
+                        var licenseStatus by remember { mutableStateOf("") }
+                        var isVerifying by remember { mutableStateOf(false) }
+                        val coroutineScope = rememberCoroutineScope()
+
+                        Column(modifier = Modifier.fillMaxWidth()) {
                             Text(
                                 text = Strings.get("pro_version", appLanguage),
                                 color = TextLight,
-                                fontSize = 14.sp
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
                             )
+                            Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = Strings.get("pro_desc", appLanguage),
+                                text = "Lisans anahtarınızı girin:",
                                 color = TextMuted,
                                 fontSize = 11.sp
                             )
-                        }
-                        Switch(
-                            checked = AppConfig.isProVersion(context),
-                            onCheckedChange = { AppConfig.setProVersion(context, it) },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = NeonCyan,
-                                checkedTrackColor = NeonCyan.copy(alpha = 0.3f)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = licenseInput,
+                                onValueChange = { licenseInput = it },
+                                placeholder = { Text("XXXXXXXX-XXXXXXXX-XXXXXXXX", color = TextMuted, fontSize = 12.sp) },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = NeonCyan,
+                                    unfocusedBorderColor = Color.DarkGray,
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White
+                                )
                             )
-                        )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Button(
+                                onClick = {
+                                    if (licenseInput.isNotBlank()) {
+                                        isVerifying = true
+                                        licenseStatus = ""
+                                        coroutineScope.launch {
+                                            val success = AppConfig.activateWithLicense(context, licenseInput.trim())
+                                            isVerifying = false
+                                            licenseStatus = if (success) "✅ Pro aktif edildi!" else "❌ Geçersiz lisans anahtarı"
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700)),
+                                enabled = !isVerifying && licenseInput.isNotBlank()
+                            ) {
+                                if (isVerifying) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        color = SpaceObsidian,
+                                        strokeWidth = 2.dp
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                }
+                                Text(
+                                    if (isVerifying) "Doğrulanıyor..." else "🔑 Lisansı Doğrula",
+                                    color = SpaceObsidian,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            if (licenseStatus.isNotEmpty()) {
+                                Text(
+                                    text = licenseStatus,
+                                    color = if (licenseStatus.startsWith("✅")) Color(0xFF4CAF50) else HotPink,
+                                    fontSize = 12.sp,
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Pro: gumroad.com/cinefx adresinden satın alın",
+                                color = TextMuted,
+                                fontSize = 10.sp
+                            )
+                        }
                     }
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(

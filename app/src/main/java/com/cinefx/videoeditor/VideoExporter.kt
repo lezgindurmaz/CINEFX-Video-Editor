@@ -137,7 +137,8 @@ object VideoExporter {
         isJoinMode: Boolean,
         hasIntro: Boolean = false,
         hasOutro: Boolean = false,
-        enableWatermark: Boolean = false
+        enableWatermark: Boolean = false,
+        maxExportHeight: Int = 720
     ): List<Effect> {
         val effectsList = mutableListOf<Effect>()
 
@@ -194,8 +195,8 @@ object VideoExporter {
 
                 override fun getBitmap(presentationTimeUs: Long): android.graphics.Bitmap {
                     val presentationTimeMs = presentationTimeUs / 1000
-                    val width = 1280
-                    val height = 720
+                    val height = maxExportHeight
+                    val width = (maxExportHeight * 16) / 9
                     val (bitmap, canvas) = getOrCreateBitmap(width, height)
 
                     for (item in textOverlays) {
@@ -270,21 +271,61 @@ object VideoExporter {
                     }
 
                     if (enableWatermark) {
+                        // Main watermark - large, bottom-right, semi-transparent but obvious
                         val wmPaint = android.graphics.Paint().apply {
                             color = android.graphics.Color.WHITE
-                            alpha = 140
-                            textSize = height * 0.04f
+                            alpha = 100
+                            textSize = height * 0.08f
                             isAntiAlias = true
                             textAlign = android.graphics.Paint.Align.RIGHT
-                            setShadowLayer(4f, 2f, 2f, android.graphics.Color.BLACK)
+                            setShadowLayer(6f, 3f, 3f, android.graphics.Color.BLACK)
                             typeface = android.graphics.Typeface.DEFAULT_BOLD
                         }
                         canvas.drawText(
-                            "CINEFX \u2022 Free Version",
-                            width - (width * 0.03f),
-                            height - (height * 0.04f),
+                            "CINEFX",
+                            width - (width * 0.04f),
+                            height - (height * 0.06f),
                             wmPaint
                         )
+                        // Sub-text below main watermark
+                        val subPaint = android.graphics.Paint().apply {
+                            color = android.graphics.Color.WHITE
+                            alpha = 80
+                            textSize = height * 0.035f
+                            isAntiAlias = true
+                            textAlign = android.graphics.Paint.Align.RIGHT
+                            setShadowLayer(4f, 2f, 2f, android.graphics.Color.BLACK)
+                            typeface = android.graphics.Typeface.DEFAULT
+                        }
+                        canvas.drawText(
+                            "Free Version",
+                            width - (width * 0.04f),
+                            height - (height * 0.025f),
+                            subPaint
+                        )
+                        // Diagonal repeating watermark across the video (anti-crop)
+                        val diagPaint = android.graphics.Paint().apply {
+                            color = android.graphics.Color.WHITE
+                            alpha = 35
+                            textSize = height * 0.05f
+                            isAntiAlias = true
+                            textAlign = android.graphics.Paint.Align.CENTER
+                            typeface = android.graphics.Typeface.DEFAULT_BOLD
+                        }
+                        canvas.save()
+                        canvas.rotate(-30f, width / 2f, height / 2f)
+                        val stepX = width * 0.4f
+                        val stepY = height * 0.25f
+                        var y = -height * 0.5f
+                        while (y < height * 1.5f) {
+                            var x = -width * 0.5f
+                            while (x < width * 1.5f) {
+                                canvas.drawText("CINEFX", x, y, diagPaint)
+                                x += stepX
+                            }
+                            y += stepY
+                        }
+                        canvas.restore()
                     }
 
                     return bitmap
@@ -310,6 +351,7 @@ object VideoExporter {
             try {
                 val outputDir = File(context.cacheDir, "edited_videos").apply { if (!exists()) mkdirs() }
                 val outputFile = File(outputDir, "edited_video_${System.currentTimeMillis()}.mp4")
+                val exportHeight = AppConfig.getMaxExportHeight(context)
                 var totalDuration = 0L
                 val videoSegments = mutableListOf<EditedMediaItem>()
 
@@ -320,7 +362,7 @@ object VideoExporter {
                         val introEffects = createEffectsForSegment(
                             0, config.introDurationMs, true, false,
                             config.enableTransition, emptyList(), emptyList(), emptyList(), emptyList(),
-                            false, false, false
+                            false, false, false, maxExportHeight = exportHeight
                         )
                         videoSegments.add(
                             EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(introFile)))
@@ -349,7 +391,8 @@ object VideoExporter {
                     isJoinMode,
                     config.introImageUri != null,
                     config.videoUri2 != null || config.outroImageUri != null,
-                    config.enableWatermark
+                    config.enableWatermark,
+                    maxExportHeight = exportHeight
                 )
 
                 val videoEditedItemBuilder1 = EditedMediaItem.Builder(
@@ -390,7 +433,7 @@ object VideoExporter {
                     val seg2Effects = createEffectsForSegment(
                         config.startMs2, duration2, false, config.outroImageUri == null,
                         config.enableTransition, emptyList(), emptyList(), emptyList(), emptyList(),
-                        true, false, false, config.enableWatermark
+                        true, false, false, config.enableWatermark, maxExportHeight = exportHeight
                     )
                     val videoMediaItem2 = MediaItem.Builder()
                         .setUri(config.videoUri2)
@@ -429,7 +472,7 @@ object VideoExporter {
                         val outroEffects = createEffectsForSegment(
                             0, config.outroDurationMs, false, true,
                             config.enableTransition, emptyList(), emptyList(), emptyList(), emptyList(),
-                            false, false, false
+                            false, false, false, maxExportHeight = exportHeight
                         )
                         videoSegments.add(
                             EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(outroFile)))
